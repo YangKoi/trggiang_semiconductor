@@ -573,6 +573,25 @@
               </div>
             </div>
 
+            <div class="grid grid-cols-3 gap-3">
+              <div>
+                <label class="block text-zinc-500 mb-1">SCALE MIN</label>
+                <input type="number" step="0.01" id="setting-min" class="bg-zinc-950 border border-zinc-800 rounded px-3 py-2 w-full text-zinc-200 focus:outline-none focus:border-blue-500">
+              </div>
+              <div>
+                <label class="block text-zinc-500 mb-1">SCALE MAX</label>
+                <input type="number" step="0.01" id="setting-max" class="bg-zinc-950 border border-zinc-800 rounded px-3 py-2 w-full text-zinc-200 focus:outline-none focus:border-blue-500">
+              </div>
+              <div>
+                <label class="block text-zinc-500 mb-1">UNIT</label>
+                <select id="setting-unit" class="bg-zinc-950 border border-zinc-800 rounded px-3 py-2 w-full text-zinc-200 focus:outline-none focus:border-blue-500">
+                  <option value="PPM">PPM</option>
+                  <option value="%LEL">%LEL</option>
+                  <option value="%VOL">%VOL</option>
+                </select>
+              </div>
+            </div>
+
             <div class="flex gap-2 pt-3 border-t border-zinc-800 mt-4">
               <button type="button" onclick="lockSettings()" class="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-3 py-2 rounded text-xs transition-all flex items-center gap-1.5">
                 <i data-lucide="lock" class="w-3.5 h-3.5"></i> Lock
@@ -643,7 +662,11 @@
         <div class="grid grid-cols-3 gap-2">
           <div>
             <label class="block text-zinc-500 mb-1">UNIT</label>
-            <input type="text" id="admin-form-unit" value="PPM" class="bg-zinc-950 border border-zinc-800 rounded px-2 py-2 w-full text-zinc-200 focus:outline-none focus:border-blue-500">
+            <select id="admin-form-unit" class="bg-zinc-950 border border-zinc-800 rounded px-2 py-2 w-full text-zinc-200 focus:outline-none focus:border-blue-500">
+              <option value="PPM">PPM</option>
+              <option value="%LEL">%LEL</option>
+              <option value="%VOL">%VOL</option>
+            </select>
           </div>
           <div>
             <label class="block text-zinc-400 mb-1 font-semibold text-amber-400">LOW ALARM *</label>
@@ -652,6 +675,17 @@
           <div>
             <label class="block text-zinc-400 mb-1 font-semibold text-rose-500">HIGH ALARM *</label>
             <input type="number" step="0.001" id="admin-form-high" required class="bg-zinc-950 border border-rose-500/40 rounded px-2 py-2 w-full text-rose-500 focus:outline-none focus:border-rose-500">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-zinc-500 mb-1">SCALE MIN *</label>
+            <input type="number" step="0.001" id="admin-form-min" required class="bg-zinc-950 border border-zinc-800 rounded px-3 py-2 w-full text-zinc-200 focus:outline-none focus:border-blue-500">
+          </div>
+          <div>
+            <label class="block text-zinc-500 mb-1">SCALE MAX *</label>
+            <input type="number" step="0.001" id="admin-form-max" required class="bg-zinc-950 border border-zinc-800 rounded px-3 py-2 w-full text-zinc-200 focus:outline-none focus:border-blue-500">
           </div>
         </div>
 
@@ -970,40 +1004,43 @@
       let activeAlarmsCount = 0;
 
       sensors.forEach(sensor => {
+        let minL = sensor.minLimit !== undefined ? sensor.minLimit : 0.0;
+        let maxL = sensor.maxLimit !== undefined ? sensor.maxLimit : sensor.highLimit * 1.5;
+
         // Random fluctuation logic
         let fluctuation = 0;
         if (sensor.gas === "Oxygen Depletion") {
-          // Oxygen fluctuates slightly around 20.9
           fluctuation = (Math.random() - 0.5) * 0.04;
-          // Apply leak increase logic if triggered
+          let targetHover = (minL < 15 && maxL > 22) ? 20.92 : (minL + (maxL - minL) * 0.836);
           if (sensor.leakState === 'leak') {
-            sensor.value = Math.max(16.0, sensor.value - 0.2); // drop O2 content
+            sensor.value = Math.max(minL, sensor.value - (maxL - minL) * 0.01);
           } else if (sensor.leakState === 'purge') {
-            sensor.value = Math.min(20.92, sensor.value + 0.3);
-            if (sensor.value >= 20.9) sensor.leakState = null;
+            sensor.value = Math.min(maxL, sensor.value + (maxL - minL) * 0.015);
+            if (sensor.value >= targetHover) sensor.leakState = null;
           } else {
-            sensor.value = Math.max(20.8, Math.min(21.0, sensor.value + fluctuation));
+            sensor.value = Math.max(minL, Math.min(maxL, sensor.value + fluctuation));
+            if (sensor.value < targetHover - 0.2) sensor.value += 0.01;
+            if (sensor.value > targetHover + 0.2) sensor.value -= 0.01;
           }
         } else {
-          // Toxic/Flammable gases fluctuate near 0
-          fluctuation = (Math.random() - 0.5) * 0.005;
+          fluctuation = (Math.random() - 0.5) * (maxL - minL) * 0.005;
           if (sensor.leakState === 'leak') {
-            // Leak forces PPM to rise up to 1.3x high Limit
-            sensor.value = Math.min(sensor.maxLimit, sensor.value + (sensor.highLimit * 0.15));
+            sensor.value = Math.min(maxL, sensor.value + (sensor.highLimit * 0.15));
           } else if (sensor.leakState === 'purge') {
-            sensor.value = Math.max(0.001, sensor.value - (sensor.highLimit * 0.2));
-            if (sensor.value <= (sensor.lowLimit / 10)) sensor.leakState = null;
+            sensor.value = Math.max(minL, sensor.value - (sensor.highLimit * 0.2));
+            if (sensor.value <= (minL + (sensor.highLimit * 0.1))) sensor.leakState = null;
           } else {
-            // Standard small background noise
-            let baseNoise = (sensor.gas === "Ammonia") ? 1.5 : 0.02;
-            sensor.value = Math.max(0.001, sensor.value + fluctuation);
+            let baseNoise = minL + (maxL - minL) * 0.01;
+            sensor.value = Math.max(minL, Math.min(maxL, sensor.value + fluctuation));
+            if (sensor.value < baseNoise) sensor.value += (maxL - minL) * 0.001;
+            if (sensor.value > baseNoise + (maxL - minL) * 0.05) sensor.value -= (maxL - minL) * 0.001;
           }
         }
 
         // Determine Status based on limits
         let prevStatus = sensor.status;
         if (sensor.gas === "Oxygen Depletion") {
-          if (sensor.value <= 19.50) {
+          if (sensor.value <= sensor.lowLimit) {
             sensor.status = "CRITICAL";
             activeAlarmsCount++;
             hasActiveHighAlarm = true;
@@ -1218,12 +1255,13 @@
         row.onclick = () => openSensorModal(sensor.id);
 
         // calculate progress bar filling width percentage
-        let percentage = (sensor.value / sensor.highLimit) * 100;
-        if (sensor.gas === "Oxygen Depletion") {
-          // oxygen normal is high (20.9), alarm is low. Invert visual bar representation.
-          percentage = Math.max(0, Math.min(100, ((20.9 - sensor.value) / (20.9 - 19.0)) * 100));
+        let minL = sensor.minLimit !== undefined ? sensor.minLimit : 0.0;
+        let maxL = sensor.maxLimit !== undefined ? sensor.maxLimit : sensor.highLimit * 1.5;
+        let percentage = 0;
+        if (maxL - minL > 0) {
+          percentage = ((sensor.value - minL) / (maxL - minL)) * 100;
         }
-        percentage = Math.min(100, Math.max(1, percentage));
+        percentage = Math.min(100, Math.max(0, percentage));
 
         let barColor = "bg-emerald-500";
         if (sensor.status === "WARNING") barColor = "bg-amber-500";
@@ -1274,11 +1312,13 @@
         ppmCol.textContent = `${sensor.value.toFixed(sensor.gas.includes("Arsine") ? 3 : 2)} ${sensor.unit}`;
 
         // Update Progress Bar Column
-        let percentage = (sensor.value / sensor.highLimit) * 100;
-        if (sensor.gas === "Oxygen Depletion") {
-          percentage = Math.max(0, Math.min(100, ((20.9 - sensor.value) / (20.9 - 19.0)) * 100));
+        let minL = sensor.minLimit !== undefined ? sensor.minLimit : 0.0;
+        let maxL = sensor.maxLimit !== undefined ? sensor.maxLimit : sensor.highLimit * 1.5;
+        let percentage = 0;
+        if (maxL - minL > 0) {
+          percentage = ((sensor.value - minL) / (maxL - minL)) * 100;
         }
-        percentage = Math.min(100, Math.max(1, percentage));
+        percentage = Math.min(100, Math.max(0, percentage));
 
         let barColor = "bg-emerald-500";
         if (sensor.status === "WARNING") barColor = "bg-amber-500";
@@ -1562,6 +1602,9 @@
         document.getElementById("setting-rate").value = sensor.samplingRate;
         document.getElementById("setting-low").value = sensor.lowLimit.toFixed(2);
         document.getElementById("setting-high").value = sensor.highLimit.toFixed(2);
+        document.getElementById("setting-min").value = (sensor.minLimit !== undefined ? sensor.minLimit : 0.0).toFixed(2);
+        document.getElementById("setting-max").value = (sensor.maxLimit !== undefined ? sensor.maxLimit : sensor.highLimit * 1.5).toFixed(2);
+        document.getElementById("setting-unit").value = sensor.unit || "PPM";
       } else {
         errorSpan.classList.remove("hidden");
       }
@@ -1583,8 +1626,11 @@
       sensor.samplingRate = parseFloat(document.getElementById("setting-rate").value);
       sensor.lowLimit = parseFloat(document.getElementById("setting-low").value);
       sensor.highLimit = parseFloat(document.getElementById("setting-high").value);
+      sensor.minLimit = parseFloat(document.getElementById("setting-min").value);
+      sensor.maxLimit = parseFloat(document.getElementById("setting-max").value);
+      sensor.unit = document.getElementById("setting-unit").value;
 
-      addHmiLog("SYSTEM", `Sensor ${sensor.id} thresholds recalibrated. Low: ${sensor.lowLimit} PPM, High: ${sensor.highLimit} PPM`, "info");
+      addHmiLog("SYSTEM", `Sensor ${sensor.id} thresholds recalibrated. Low: ${sensor.lowLimit} ${sensor.unit}, High: ${sensor.highLimit} ${sensor.unit}, Scale: [${sensor.minLimit} - ${sensor.maxLimit}]`, "info");
       
       closeSensorModal();
       renderSensorTable();
@@ -1741,11 +1787,18 @@
           sensors.forEach(s => {
             if (!s.history) s.history = Array(10).fill(s.value);
             if (!s.historyTimes) s.historyTimes = ["10:35", "10:36", "10:37", "10:38", "10:39", "10:40", "10:41", "10:42", "10:43", "10:44"];
+            if (s.minLimit === undefined) s.minLimit = 0.00;
+            if (s.maxLimit === undefined) s.maxLimit = s.highLimit * 1.5;
           });
         } catch(e) {
           console.error("Error parsing saved configuration", e);
           localStorage.removeItem(STORAGE_KEY_SENSORS);
         }
+      } else {
+        sensors.forEach(s => {
+          if (s.minLimit === undefined) s.minLimit = 0.00;
+          if (s.maxLimit === undefined) s.maxLimit = s.highLimit * 1.5;
+        });
       }
       
       const storedBg = localStorage.getItem(STORAGE_KEY_BG_IMAGE);
@@ -1949,9 +2002,11 @@
       document.getElementById("admin-form-zone").value = sensor.zone;
       document.getElementById("admin-form-gas").value = sensor.gas;
       document.getElementById("admin-form-formula").value = sensor.formula;
-      document.getElementById("admin-form-unit").value = sensor.unit;
+      document.getElementById("admin-form-unit").value = sensor.unit || "PPM";
       document.getElementById("admin-form-low").value = sensor.lowLimit;
       document.getElementById("admin-form-high").value = sensor.highLimit;
+      document.getElementById("admin-form-min").value = sensor.minLimit !== undefined ? sensor.minLimit : 0.00;
+      document.getElementById("admin-form-max").value = sensor.maxLimit !== undefined ? sensor.maxLimit : sensor.highLimit * 1.5;
       document.getElementById("admin-form-ip").value = sensor.ip;
       document.getElementById("admin-form-port").value = sensor.port;
       
@@ -1972,9 +2027,11 @@
       const name = document.getElementById("admin-form-name").value.trim();
       const zone = document.getElementById("admin-form-zone").value.trim();
       const gas = document.getElementById("admin-form-gas").value.trim();
-      const unit = document.getElementById("admin-form-unit").value.trim() || "PPM";
+      const unit = document.getElementById("admin-form-unit").value;
       const lowLimit = parseFloat(document.getElementById("admin-form-low").value);
       const highLimit = parseFloat(document.getElementById("admin-form-high").value);
+      const minLimit = parseFloat(document.getElementById("admin-form-min").value);
+      const maxLimit = parseFloat(document.getElementById("admin-form-max").value);
       const ip = document.getElementById("admin-form-ip").value.trim();
       const port = parseInt(document.getElementById("admin-form-port").value) || 502;
 
@@ -2001,7 +2058,8 @@
           samplingRate: 1.0,
           lowLimit,
           highLimit,
-          maxLimit: highLimit * 1.5,
+          minLimit,
+          maxLimit,
           history: Array(10).fill(gas === "Oxygen Depletion" ? 20.9 : 0.005),
           historyTimes: ["10:35", "10:36", "10:37", "10:38", "10:39", "10:40", "10:41", "10:42", "10:43", "10:44"]
         };
@@ -2019,7 +2077,8 @@
           sensor.unit = unit;
           sensor.lowLimit = lowLimit;
           sensor.highLimit = highLimit;
-          sensor.maxLimit = highLimit * 1.5;
+          sensor.minLimit = minLimit;
+          sensor.maxLimit = maxLimit;
           sensor.ip = ip;
           sensor.port = port;
           
