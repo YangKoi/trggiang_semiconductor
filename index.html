@@ -1732,12 +1732,37 @@
       renderSimSliders();
     };
 
-    // Chemical reference grid loader
+    // Chemical reference grid loader (Self-generates from configured sensor profiles)
     function initRefEncyclopedia() {
       const container = document.getElementById("chemical-ref-grid");
+      if (!container) return;
       container.innerHTML = "";
 
-      chemicalProfiles.forEach(p => {
+      // Start with default static profiles
+      let activeProfiles = [...chemicalProfiles];
+
+      // Auto-scan sensors list to discover custom/new gas profiles
+      sensors.forEach(sensor => {
+        // Deduplicate profiles by case-insensitive name or formula match
+        const exists = activeProfiles.some(p => 
+          p.name.toLowerCase() === sensor.gas.toLowerCase() || 
+          p.formula.toLowerCase() === sensor.formula.toLowerCase()
+        );
+
+        if (!exists && sensor.gas !== "Oxygen Depletion") {
+          activeProfiles.push({
+            name: sensor.gas,
+            formula: sensor.formula,
+            class: "Toxic / Flammable Gas",
+            tlv: `${sensor.lowLimit} ${sensor.unit}`,
+            idlh: `${sensor.highLimit} ${sensor.unit}`,
+            hazard: `System detector: ${sensor.id} (${sensor.name}) installed at ${sensor.zone}.`,
+            color: "amber"
+          });
+        }
+      });
+
+      activeProfiles.forEach(p => {
         const card = document.createElement("div");
         card.className = "bg-zinc-950/40 border border-zinc-800/80 rounded-xl p-3.5 flex flex-col justify-between font-mono text-[10.5px] text-zinc-400";
         card.innerHTML = `
@@ -2149,6 +2174,7 @@
       renderSensorTable();
       renderAdminSensorList();
       renderSimSliders();
+      initRefEncyclopedia();
     };
 
     // Remove detector
@@ -2160,6 +2186,7 @@
         renderSensorTable();
         renderAdminSensorList();
         renderSimSliders();
+        initRefEncyclopedia();
         addHmiLog("SYSTEM", `Detector '${sensorId}' removed from system configuration.`, "warning");
       }
     };
