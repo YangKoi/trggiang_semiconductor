@@ -970,17 +970,17 @@
         overlay.style.top = `${sensor.top}%`;
         
         // Centering overlay box on star coordinate using transform translate
-        overlay.className = `absolute transform -translate-x-1/2 -translate-y-1/2 flex flex-col justify-between border rounded-lg px-2.5 py-1.5 cursor-pointer select-none transition-all duration-200 w-[125px] h-[55px] font-mono text-[9px] ${getOverlayStatusStyle(sensor.status)}`;
+        overlay.className = `absolute transform -translate-x-1/2 -translate-y-1/2 flex flex-col justify-between border rounded-md px-2 py-0.5 cursor-pointer select-none transition-all duration-200 w-[90px] h-[38px] font-mono text-[8px] ${getOverlayStatusStyle(sensor.status)}`;
         overlay.onclick = () => openSensorModal(sensor.id);
 
         overlay.innerHTML = `
-          <div class="flex justify-between items-center opacity-85 font-semibold text-zinc-300">
-            <span>${sensor.id}</span>
-            <span class="text-[8px] font-bold bg-zinc-800 px-1 py-0.2 rounded text-zinc-400">${sensor.formula}</span>
+          <div class="flex justify-between items-center opacity-85 text-[7px] text-zinc-300">
+            <span class="font-bold">${sensor.id.replace("GD-", "")}</span>
+            <span class="text-[6.5px] font-bold bg-zinc-800 px-0.5 rounded text-zinc-400">${sensor.formula}</span>
           </div>
-          <div class="flex items-baseline justify-between mt-0.5">
-            <span class="text-sm font-bold tracking-tight text-white value-readout">${sensor.value.toFixed(sensor.gas.includes("Arsine") ? 3 : 2)}</span>
-            <span class="text-[8px] opacity-75 font-semibold text-zinc-400">${sensor.unit}</span>
+          <div class="flex items-baseline justify-between">
+            <span class="text-[11px] font-bold tracking-tight text-white value-readout">${sensor.value.toFixed(sensor.gas.includes("Arsine") ? 3 : 2)}</span>
+            <span class="text-[7px] opacity-75 font-semibold text-zinc-400">${sensor.unit}</span>
           </div>
         `;
 
@@ -993,7 +993,7 @@
       sensors.forEach(sensor => {
         const overlay = document.getElementById(`overlay-${sensor.id}`);
         if (overlay) {
-          overlay.className = `absolute transform -translate-x-1/2 -translate-y-1/2 flex flex-col justify-between border rounded-lg px-2.5 py-1.5 cursor-pointer select-none transition-all duration-200 w-[125px] h-[55px] font-mono text-[9px] ${getOverlayStatusStyle(sensor.status)}`;
+          overlay.className = `absolute transform -translate-x-1/2 -translate-y-1/2 flex flex-col justify-between border rounded-md px-2 py-0.5 cursor-pointer select-none transition-all duration-200 w-[90px] h-[38px] font-mono text-[8px] ${getOverlayStatusStyle(sensor.status)}`;
           
           const valReadout = overlay.querySelector(".value-readout");
           if (valReadout) {
