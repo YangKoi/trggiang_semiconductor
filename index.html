@@ -576,13 +576,20 @@
 
           <!-- Configuration Panel (Locked by default) -->
           <form id="settings-form" class="hidden space-y-3 text-xs font-mono">
-            <div class="grid grid-cols-2 gap-3">
+            <div class="grid grid-cols-3 gap-2">
+              <div>
+                <label class="block text-zinc-500 mb-1">CONN MODE</label>
+                <select id="setting-mode" class="bg-zinc-950 border border-zinc-800 rounded px-2 py-2 w-full text-zinc-200 focus:outline-none focus:border-blue-500">
+                  <option value="OFFLINE">OFFLINE</option>
+                  <option value="ONLINE">ONLINE</option>
+                </select>
+              </div>
               <div>
                 <label class="block text-zinc-500 mb-1">IP ADDRESS</label>
                 <input type="text" id="setting-ip" class="bg-zinc-950 border border-zinc-800 rounded px-3 py-2 w-full text-zinc-200 focus:outline-none focus:border-blue-500">
               </div>
               <div>
-                <label class="block text-zinc-500 mb-1">MODBUS PORT</label>
+                <label class="block text-zinc-500 mb-1">PORT</label>
                 <input type="number" id="setting-port" class="bg-zinc-950 border border-zinc-800 rounded px-3 py-2 w-full text-zinc-200 focus:outline-none focus:border-blue-500">
               </div>
             </div>
@@ -718,14 +725,21 @@
           </div>
         </div>
 
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-3 gap-2">
+          <div>
+            <label class="block text-zinc-500 mb-1">CONN MODE *</label>
+            <select id="admin-form-mode-conn" class="bg-zinc-950 border border-zinc-800 rounded px-2 py-2 w-full text-zinc-200 focus:outline-none focus:border-blue-500">
+              <option value="OFFLINE">OFFLINE</option>
+              <option value="ONLINE">ONLINE</option>
+            </select>
+          </div>
           <div>
             <label class="block text-zinc-500 mb-1">IP ADDRESS</label>
-            <input type="text" id="admin-form-ip" value="192.168.12.50" class="bg-zinc-950 border border-zinc-800 rounded px-3 py-2 w-full text-zinc-200 focus:outline-none focus:border-blue-500">
+            <input type="text" id="admin-form-ip" value="192.168.12.50" class="bg-zinc-950 border border-zinc-800 rounded px-2 py-2 w-full text-zinc-200 focus:outline-none focus:border-blue-500">
           </div>
           <div>
             <label class="block text-zinc-500 mb-1">MODBUS PORT</label>
-            <input type="number" id="admin-form-port" value="502" class="bg-zinc-950 border border-zinc-800 rounded px-3 py-2 w-full text-zinc-200 focus:outline-none focus:border-blue-500">
+            <input type="number" id="admin-form-port" value="502" class="bg-zinc-950 border border-zinc-800 rounded px-2 py-2 w-full text-zinc-200 focus:outline-none focus:border-blue-500">
           </div>
         </div>
 
@@ -1032,6 +1046,71 @@
       document.getElementById("current-date").textContent = now.toLocaleDateString('en-US', options);
     }
 
+    // Asynchronously polls physical Modbus TCP client via python web gateway
+    async function pollOnlineSensor(sensor) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 800); // 800ms abort timeout
+        
+        const url = `http://localhost:5000/api/read?ip=${sensor.ip}&port=${sensor.port}&id=${sensor.id}`;
+        const response = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) throw new Error("HTTP Gateway returned error status");
+        
+        const data = await response.json();
+        const newVal = parseFloat(data.value);
+        if (isNaN(newVal)) throw new Error("Invalid Modbus numeric register payload");
+
+        sensor.value = newVal;
+        let prevStatus = sensor.status;
+        
+        // Evaluate alerts
+        if (sensor.gas === "Oxygen Depletion") {
+          if (sensor.value <= sensor.lowLimit) {
+            sensor.status = "CRITICAL";
+          } else if (sensor.value <= 20.00) {
+            sensor.status = "WARNING";
+          } else {
+            sensor.status = "NORMAL";
+          }
+        } else {
+          if (sensor.value >= sensor.highLimit) {
+            sensor.status = "CRITICAL";
+          } else if (sensor.value >= sensor.lowLimit) {
+            sensor.status = "WARNING";
+          } else {
+            sensor.status = "NORMAL";
+          }
+        }
+
+        if (prevStatus === "FAULT") {
+          addHmiLog(sensor.id, `Modbus TCP connection restored with device at ${sensor.ip}`, "info");
+        } else if (prevStatus !== sensor.status) {
+          let severity = "info";
+          if (sensor.status === "WARNING") severity = "warning";
+          if (sensor.status === "CRITICAL") severity = "critical";
+          addHmiLog(sensor.id, `Status transitioned to ${sensor.status} [${sensor.value.toFixed(3)} ${sensor.unit}]`, severity);
+        }
+
+      } catch (err) {
+        sensor.value = 0.0;
+        let prevStatus = sensor.status;
+        sensor.status = "FAULT";
+        if (prevStatus !== "FAULT") {
+          addHmiLog(sensor.id, `CONNECTION FAILURE: Unable to connect to PLC at ${sensor.ip}:${sensor.port} (Offline)`, "critical");
+        }
+      }
+
+      // Sync data to history log
+      sensor.history.push(sensor.value);
+      if (sensor.history.length > 15) sensor.history.shift();
+
+      // Trigger UI updates
+      updateHmiOverlays();
+      updateSensorTableUI();
+    }
+
     // 1-second simulation tick
     function pollingInterval() {
       hasActiveHighAlarm = false;
@@ -1040,6 +1119,19 @@
       sensors.forEach(sensor => {
         let minL = sensor.minLimit !== undefined ? sensor.minLimit : 0.0;
         let maxL = sensor.maxLimit !== undefined ? sensor.maxLimit : sensor.highLimit * 1.5;
+
+        // Redirect to Online Ethernet polling if active
+        if (sensor.connectionMode === "ONLINE") {
+          pollOnlineSensor(sensor);
+          
+          if (sensor.status === "CRITICAL") {
+            activeAlarmsCount++;
+            hasActiveHighAlarm = true;
+          } else if (sensor.status === "WARNING") {
+            activeAlarmsCount++;
+          }
+          return;
+        }
 
         // Skip simulation logic if manual slider override is active
         if (sensor.isManualSimulated) {
@@ -1646,6 +1738,7 @@
 
         // Load values
         const sensor = sensors.find(s => s.id === activeSensorId);
+        document.getElementById("setting-mode").value = sensor.connectionMode || "OFFLINE";
         document.getElementById("setting-ip").value = sensor.ip;
         document.getElementById("setting-port").value = sensor.port;
         document.getElementById("setting-rate").value = sensor.samplingRate;
@@ -1670,6 +1763,7 @@
     window.saveSettings = function() {
       const sensor = sensors.find(s => s.id === activeSensorId);
       
+      sensor.connectionMode = document.getElementById("setting-mode").value;
       sensor.ip = document.getElementById("setting-ip").value;
       sensor.port = parseInt(document.getElementById("setting-port").value);
       sensor.samplingRate = parseFloat(document.getElementById("setting-rate").value);
@@ -1871,6 +1965,7 @@
             if (!s.historyTimes) s.historyTimes = ["10:35", "10:36", "10:37", "10:38", "10:39", "10:40", "10:41", "10:42", "10:43", "10:44"];
             if (s.minLimit === undefined) s.minLimit = 0.00;
             if (s.maxLimit === undefined) s.maxLimit = s.highLimit * 1.5;
+            if (s.connectionMode === undefined) s.connectionMode = "OFFLINE";
           });
         } catch(e) {
           console.error("Error parsing saved configuration", e);
@@ -1880,6 +1975,7 @@
         sensors.forEach(s => {
           if (s.minLimit === undefined) s.minLimit = 0.00;
           if (s.maxLimit === undefined) s.maxLimit = s.highLimit * 1.5;
+          if (s.connectionMode === undefined) s.connectionMode = "OFFLINE";
         });
       }
       
@@ -2089,6 +2185,7 @@
       document.getElementById("admin-form-high").value = sensor.highLimit;
       document.getElementById("admin-form-min").value = sensor.minLimit !== undefined ? sensor.minLimit : 0.00;
       document.getElementById("admin-form-max").value = sensor.maxLimit !== undefined ? sensor.maxLimit : sensor.highLimit * 1.5;
+      document.getElementById("admin-form-mode-conn").value = sensor.connectionMode || "OFFLINE";
       document.getElementById("admin-form-ip").value = sensor.ip;
       document.getElementById("admin-form-port").value = sensor.port;
       
@@ -2114,6 +2211,7 @@
       const highLimit = parseFloat(document.getElementById("admin-form-high").value);
       const minLimit = parseFloat(document.getElementById("admin-form-min").value);
       const maxLimit = parseFloat(document.getElementById("admin-form-max").value);
+      const connectionMode = document.getElementById("admin-form-mode-conn").value;
       const ip = document.getElementById("admin-form-ip").value.trim();
       const port = parseInt(document.getElementById("admin-form-port").value) || 502;
 
@@ -2135,6 +2233,7 @@
           value: gas === "Oxygen Depletion" ? 20.9 : 0.005,
           unit,
           status: "NORMAL",
+          connectionMode,
           ip,
           port,
           samplingRate: 1.0,
@@ -2161,6 +2260,7 @@
           sensor.highLimit = highLimit;
           sensor.minLimit = minLimit;
           sensor.maxLimit = maxLimit;
+          sensor.connectionMode = connectionMode;
           sensor.ip = ip;
           sensor.port = port;
           
