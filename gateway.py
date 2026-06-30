@@ -18,8 +18,8 @@ def read_modbus():
     port = int(request.args.get('port', 502))
     sensor_id = request.args.get('id', 'GD-00')
     
-    # If using localhost/mock or if pymodbus is missing, run simulated connection
-    if ip == '127.0.0.1' or ip.lower() == 'mock' or not pymodbus_available:
+    # Run mock simulation if explicitly requested or if pymodbus is not installed
+    if ip.lower() == 'mock' or not pymodbus_available:
         # Return simulated live sensor readings for testing
         mock_val = random.uniform(0.01, 3.5)
         if "CR-02" in sensor_id:
